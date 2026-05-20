@@ -68,3 +68,23 @@ i URL EUR-Lex.
 ## Licencja
 
 MIT.
+
+## Part of the MateMatic legal stack
+
+This server is one of five MCP connectors covering Polish jurisdiction +
+EU law, used by [Patron](https://github.com/matematicsolutions/patron)
+(AGPL-3.0) and any other MCP-aware legal AI agent.
+
+- **mcp-eu-sparql** (this repo) — EU law + CJEU (EUR-Lex / Cellar)
+- [mcp-saos](https://github.com/matematicsolutions/mcp-saos) — common courts, SN, TK, KIO
+- [mcp-nsa](https://github.com/matematicsolutions/mcp-nsa) — NSA + 16 WSA administrative courts
+- [mcp-isap](https://github.com/matematicsolutions/mcp-isap) — Polish legislation (Dz.U. + M.P.)
+- [mcp-krs](https://github.com/matematicsolutions/mcp-krs) — Polish company registry (KRS)
+
+
+All five MCP servers share the same `structuredContent.citations`
+contract: each tool returns an array of `{title, url, snippet?, ...metadata}`
+that legal agents can render directly in their citation panel.
+
+See [matematicsolutions/.github](https://github.com/matematicsolutions)
+for the full org profile.
