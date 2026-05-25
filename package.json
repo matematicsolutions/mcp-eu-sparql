@@ -1,12 +1,13 @@
 {
   "name": "mcp-eu-sparql",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "MCP server - EU legislation and CJEU case law via Publications Office SPARQL (Cellar / EUR-Lex)",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx src/index.ts",
+    "drift": "node test/drift.mjs"
   },
   "keywords": [
     "mcp",

@@ -246,12 +246,62 @@ function formatRows(rows: SparqlBinding[], header: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Instructions (procedural orchestration) - wstrzykiwane przez Server.
+// Drift test (test/drift.mjs) sprawdza spojnosc z TOOLS i ErrorCode.
+// Pattern z dograh-hq/dograh v1.31.0 (BSD-2) via mcp-eu-compliance v0.2.0.
+// ---------------------------------------------------------------------------
+
+const INSTRUCTIONS = `Ten serwer MCP odpytuje oficjalny endpoint SPARQL Publications Office (publications.europa.eu/webapi/rdf/sparql) i graf wiedzy Cellar (ontologia CDM). Zwraca akty prawne UE i orzeczenia CJEU z stabilnymi identyfikatorami CELEX i URL EUR-Lex.
+
+## Kolejnosc wywolan
+
+### Konkretny akt prawny
+1. \`search_by_celex\` - jesli znasz CELEX (np. RODO=32016R0679, AI Act=32024R1689, DORA=32022R2554). Najszybciej i najpewniej.
+
+### Przeglad legislacji w okresie
+2. \`search_by_date_range\` - akty UE z zakresu dat. Opcjonalnie filtruj typ (REG/DIR/DEC/RECO/OPIN). Maks 50 wynikow.
+
+### Orzecznictwo CJEU
+3. \`search_cjeu\` - orzeczenia Trybunalu Sprawiedliwosci UE (wyroki JUDG, postanowienia ORDER). Opcjonalny zakres dat. Format CELEX dla CJEU: 6 cyfr roku + CJ + nr sprawy (np. 62022CJ0252).
+
+## Twarde ograniczenia
+
+- **CELEX kluczowy dla cytowalnosci** - kazda odpowiedz zawiera CELEX w \`structuredContent.citations\`. Bez CELEX brak cytowalnosci.
+- **Wielojezycznosc 24 jezyki UE** - default jezyk POL. Parametr \`lang\` (POL/ENG/FRA/DEU). Polskie tytuly nie zawsze sa - fallback na ENG dla CJEU jesli brak.
+- **Stateless** - kazde wywolanie idzie do SPARQL live. NIE cachuj wynikow (akty konsoliduja sie / status sie zmienia).
+- **Bez scrapingu EUR-Lex** - korzystamy z oficjalnego SPARQL endpoint.
+- **\`structuredContent.citations\`**: title, url (EUR-Lex), celex, publication_date, document_type. Cytuj te citations w odpowiedzi koncowej.
+
+## Iteracja po bledach
+
+Tool zwraca \`isError: true\` + tekst z prefixem \`[code]\`. Typowe kody:
+- \`missing_arg\` - brakujacy wymagany parametr (celex w search_by_celex; date_from/date_to w search_by_date_range). Przeczytaj inputSchema.
+- \`invalid_date\` - data nie w formacie YYYY-MM-DD lub date_to przed date_from.
+- \`upstream_error\` - blad SPARQL endpoint (HTTP, timeout, malformed response). Retry raz przed surface do uzytkownika.
+- \`empty_result\` - brak wynikow dla danego CELEX/zakresu. Zwery zewnetrznym katalogiem (eur-lex.europa.eu).
+
+## Styl odpowiedzi
+
+- Cytuj akty w formacie "AI Act (32024R1689)" lub "RODO (32016R0679)" - skrocony tytul + CELEX.
+- Dla CJEU: "Wyrok C-252/22 (62022CJ0252) z dnia ...".
+- NIE wymyslaj CELEX-ow ani dat - wszystko z \`structuredContent.citations\`.
+- Disclaimer wielojezycznosci: jesli zwracasz angielskie tytuly dla aktow ktore powinny miec PL, oznacz to.`;
+
+// ---------------------------------------------------------------------------
 // Tool definitions
 // ---------------------------------------------------------------------------
+
+const READ_ONLY_ANNOTATIONS = {
+    readOnlyHint: true,
+    idempotentHint: true,
+    destructiveHint: false,
+    openWorldHint: true, // upstream SPARQL endpoint live
+} as const;
 
 const TOOLS = [
     {
         name: "search_by_celex",
+        annotations: READ_ONLY_ANNOTATIONS,
         description:
             "Znajdz akt prawny UE po numerze CELEX. " +
             "Numer CELEX jest unikalny i identyfikuje akt niezaleznie od jezyka. " +
@@ -276,6 +326,7 @@ const TOOLS = [
     },
     {
         name: "search_by_date_range",
+        annotations: READ_ONLY_ANNOTATIONS,
         description:
             "Znajdz akty prawne UE z zakresu dat (po dacie dokumentu). " +
             "Opcjonalnie filtruj po typie (REG=rozporzadzenie, DIR=dyrektywa, " +
@@ -317,6 +368,7 @@ const TOOLS = [
     },
     {
         name: "search_cjeu",
+        annotations: READ_ONLY_ANNOTATIONS,
         description:
             "Wyszukaj orzeczenia Trybunalu Sprawiedliwosci UE (CJEU) - wyroki (JUDG) " +
             "i postanowienia (ORDER). Opcjonalnie zawez do zakresu dat. " +
@@ -354,9 +406,22 @@ const TOOLS = [
 // MCP Server setup
 // ---------------------------------------------------------------------------
 
+// Strukturalne kody bledow - drift test asercja.
+type ErrorCode = "missing_arg" | "invalid_date" | "upstream_error" | "empty_result";
+
+function errorResult(text: string, code: ErrorCode) {
+    return {
+        content: [{ type: "text" as const, text: `[${code}] ${text}` }],
+        structuredContent: { error_code: code },
+        isError: true,
+    };
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 const server = new Server(
-    { name: "mcp-eu-sparql", version: "1.0.0" },
-    { capabilities: { tools: {} } },
+    { name: "mcp-eu-sparql", version: "1.1.0" },
+    { capabilities: { tools: {} }, instructions: INSTRUCTIONS },
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -364,6 +429,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         name: t.name,
         description: t.description,
         inputSchema: t.inputSchema,
+        annotations: t.annotations,
     })),
 }));
 
@@ -376,15 +442,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         switch (name) {
             case "search_by_celex": {
                 if (!a.celex || typeof a.celex !== "string") {
-                    return {
-                        content: [
-                            {
-                                type: "text",
-                                text: "Blad: parametr 'celex' jest wymagany (string).",
-                            },
-                        ],
-                        isError: true,
-                    };
+                    return errorResult("parametr 'celex' jest wymagany (string).", "missing_arg");
                 }
                 const sparql = searchByCelexQuery(a.celex, lang);
                 const data = await runSparql(sparql);
@@ -405,15 +463,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const dateFrom = a.date_from;
                 const dateTo = a.date_to;
                 if (typeof dateFrom !== "string" || typeof dateTo !== "string") {
-                    return {
-                        content: [
-                            {
-                                type: "text",
-                                text: "Blad: 'date_from' i 'date_to' sa wymagane (format YYYY-MM-DD).",
-                            },
-                        ],
-                        isError: true,
-                    };
+                    return errorResult(
+                        "'date_from' i 'date_to' sa wymagane (format YYYY-MM-DD).",
+                        "missing_arg",
+                    );
+                }
+                if (!DATE_RE.test(dateFrom) || !DATE_RE.test(dateTo)) {
+                    return errorResult(
+                        `daty musza byc w formacie YYYY-MM-DD. Otrzymano: from='${dateFrom}', to='${dateTo}'.`,
+                        "invalid_date",
+                    );
+                }
+                if (dateTo < dateFrom) {
+                    return errorResult(
+                        `date_to ('${dateTo}') wczesniejsza niz date_from ('${dateFrom}').`,
+                        "invalid_date",
+                    );
                 }
                 const typeShort =
                     typeof a.document_type === "string" ? a.document_type : null;
@@ -470,24 +535,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
 
             default:
-                return {
-                    content: [
-                        { type: "text", text: `Nieznane narzedzie: ${name}` },
-                    ],
-                    isError: true,
-                };
+                return errorResult(`Nieznane narzedzie: ${name}`, "missing_arg");
         }
     } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: `Blad komunikacji z Publications Office SPARQL: ${msg}\n\nSprobuj ponownie za chwile lub zawez zakres dat / dodaj typ dokumentu.`,
-                },
-            ],
-            isError: true,
-        };
+        return errorResult(
+            `Blad komunikacji z Publications Office SPARQL: ${msg}. Sprobuj ponownie za chwile lub zawez zakres dat / dodaj typ dokumentu.`,
+            "upstream_error",
+        );
     }
 });
 

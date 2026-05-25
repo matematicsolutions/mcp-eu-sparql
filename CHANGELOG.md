@@ -3,6 +3,18 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) +
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-05-25
+
+Retrofit do kanonu MCP MateMatic (pattern z dograh-hq/dograh v1.31.0, BSD-2). **Backward-compatible**.
+
+### Added
+
+- `instructions` w konstruktorze Server (procedural orchestration: kolejnosc wywolan, CELEX kluczowy, wielojezycznosc 24 PL/ENG/FRA/DEU, stateless bez cache, iteracja po bledach).
+- `ToolAnnotations` per tool (`readOnlyHint`, `openWorldHint=true` bo SPARQL endpoint live).
+- Strukturalne `ErrorCode`: `missing_arg`, `invalid_date`, `upstream_error`, `empty_result`. Format `[code] tekst` + `structuredContent.error_code`.
+- Walidacja formatu YYYY-MM-DD i kolejnosci dat (`invalid_date`) przed wyslaniem SPARQL.
+- Drift test (`npm run drift`).
+
 ## [1.0.0] — 2026-05-20
 
 Initial public release.
