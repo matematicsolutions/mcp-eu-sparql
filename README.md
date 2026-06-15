@@ -43,13 +43,13 @@ W `patron/backend/mcp-servers.json`:
     "name": "saos",
     "transport": "stdio",
     "command": "node",
-    "args": ["C:/Users/Wieslaw/mcp-saos/dist/index.js"]
+    "args": ["C:/Users/<TWOJ-UZYTKOWNIK>/mcp-saos/dist/index.js"]
   },
   {
     "name": "eu-sparql",
     "transport": "stdio",
     "command": "node",
-    "args": ["C:/Users/Wieslaw/mcp-eu-sparql/dist/index.js"]
+    "args": ["C:/Users/<TWOJ-UZYTKOWNIK>/mcp-eu-sparql/dist/index.js"]
   }
 ]
 ```
