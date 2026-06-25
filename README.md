@@ -1,4 +1,21 @@
 # mcp-eu-sparql
+
+## Instalacja (jedna komenda)
+
+Opublikowany na npm + MCP Registry (`io.github.matematicsolutions/mcp-eu-sparql`). Uruchomienie bez klonowania:
+
+```bash
+npx -y @matematicsolutions/mcp-eu-sparql
+```
+
+Konfiguracja klienta MCP (stdio):
+
+```json
+{ "mcpServers": { "mcp-eu-sparql": { "command": "npx", "args": ["-y", "@matematicsolutions/mcp-eu-sparql"] } } }
+```
+
+(Budowanie ze źródeł — niżej.)
+
 [![MCP](https://img.shields.io/badge/MCP-Server-blue)](https://modelcontextprotocol.io) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE) [![Node](https://img.shields.io/badge/Node-18%2B-brightgreen)](https://nodejs.org)
 
 MCP server dla prawa UE i orzecznictwa CJEU przez Publications Office SPARQL
