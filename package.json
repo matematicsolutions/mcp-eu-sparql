@@ -1,6 +1,6 @@
 {
-  "name": "mcp-eu-sparql",
-  "version": "1.1.0",
+  "name": "@matematicsolutions/mcp-eu-sparql",
+  "version": "1.1.1",
   "description": "MCP server - EU legislation and CJEU case law via Publications Office SPARQL (Cellar / EUR-Lex)",
   "main": "dist/index.js",
   "scripts": {
@@ -30,5 +30,20 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "mcpName": "io.github.matematicsolutions/mcp-eu-sparql",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/matematicsolutions/mcp-eu-sparql.git"
+  },
+  "bin": {
+    "mcp-eu-sparql": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }
