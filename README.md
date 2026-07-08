@@ -19,20 +19,32 @@ Konfiguracja klienta MCP (stdio):
 [![MCP](https://img.shields.io/badge/MCP-Server-blue)](https://modelcontextprotocol.io) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE) [![Node](https://img.shields.io/badge/Node-18%2B-brightgreen)](https://nodejs.org)
 
 MCP server dla prawa UE i orzecznictwa CJEU przez Publications Office SPARQL
-(Cellar / EUR-Lex).
+(Cellar / EUR-Lex) oraz decyzji krajowych organow ochrony danych przez GDPRhub.
+
+Korpus CJEU w Cellar (SPARQL COUNT, 2026-07-08): **34 261 wyrokow (JUDG),
+8 362 postanowien (ORDER), 14 480 opinii rzecznikow generalnych (OPIN_AG)** —
+razem 57 103 orzeczen i opinii, kazde z CELEX + ECLI.
 
 ## Tooly
 
-- **`search_by_celex(celex, lang?)`** — pojedynczy akt po numerze CELEX
-  (np. `32016R0679` = RODO).
+- **`search_by_celex(celex, lang?)`** — akt lub orzeczenie po numerze CELEX
+  (np. `32016R0679` = RODO, `62018CJ0311` = Schrems II).
 - **`search_by_date_range(date_from, date_to, document_type?, lang?, limit?)`**
   — akty z zakresu dat, opcjonalnie zawęzone do typu (REG / DIR / DEC / RECO / OPIN).
-- **`search_cjeu(date_from?, date_to?, lang?, limit?)`** — wyroki (JUDG)
-  i postanowienia (ORDER) Trybunału Sprawiedliwości UE.
+- **`search_cjeu(query?, date_from?, date_to?, document_type?, lang?, limit?)`** —
+  wyroki (JUDG), postanowienia (ORDER) i opinie rzeczników generalnych (OPIN_AG)
+  Trybunału Sprawiedliwości UE; opcjonalny keyword w tytule (strony sprawy,
+  sygnatura, słowa kluczowe wyroku).
+- **`search_cjeu_by_ecli(ecli, lang?)`** — orzeczenie CJEU po identyfikatorze
+  ECLI (np. `ECLI:EU:C:2020:559` = Schrems II).
+- **`search_gdprhub(query, limit?)`** — pełnotekstowe wyszukiwanie w
+  [GDPRhub](https://gdprhub.eu) (wiki projektu noyb): decyzje krajowych organów
+  ochrony danych z całej UE + komentarze do artykułów RODO. **Licencja treści:
+  CC BY-NC-SA 4.0** — flagowana w polu `license` każdej citation.
 
-Każda zwrotka zawiera `structuredContent.citations` z polami `title`, `url` (EUR-Lex),
-`celex`, `publication_date`, `document_type` — Patron czyta to pole i wystawia
-w panelu UI jako sekcję "Akty prawa UE (EUR-Lex / CJEU)".
+Każda zwrotka zawiera `structuredContent.citations` z polami `title`, `url`,
+`celex?`, `ecli?`, `publication_date?`, `document_type?`, `snippet?`, `license?` —
+Patron czyta to pole i wystawia w panelu UI jako sekcję "Akty prawa UE (EUR-Lex / CJEU)".
 
 ## Stack
 
@@ -40,7 +52,8 @@ w panelu UI jako sekcję "Akty prawa UE (EUR-Lex / CJEU)".
 - `@modelcontextprotocol/sdk`
 - Stdio transport (jak `mcp-saos`)
 - Backend: HTTP POST na `https://publications.europa.eu/webapi/rdf/sparql`
-  z `format=application/sparql-results+json`
+  z `format=application/sparql-results+json`; GET na `https://gdprhub.eu/api.php`
+  (MediaWiki API)
 
 ## Build + uruchomienie
 
@@ -71,16 +84,13 @@ W `patron/backend/mcp-servers.json`:
 ]
 ```
 
-## Smoke test
+## Testy
 
 ```bash
-# RODO po CELEX, tytuł po polsku
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_by_celex","arguments":{"celex":"32016R0679","lang":"POL"}}}' \
-  | node dist/index.js
+npm run drift          # offline: INSTRUCTIONS spójne z TOOLS i ErrorCode
+npm run test:offline   # offline: query buildery + parsery na fixtures (zero sieci)
+npm run smoke          # live: wszystkie 5 tooli przeciwko Cellar + GDPRhub
 ```
-
-Powinno zwrócić `Rozporzadzenie Parlamentu Europejskiego ...` z polskim tytułem
-i URL EUR-Lex.
 
 ## Licencja
 

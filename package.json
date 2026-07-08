@@ -1,13 +1,16 @@
 {
   "name": "@matematicsolutions/mcp-eu-sparql",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "MCP server - EU legislation and CJEU case law via Publications Office SPARQL (Cellar / EUR-Lex)",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "drift": "node test/drift.mjs"
+    "drift": "node test/drift.mjs",
+    "test:offline": "node test/offline.mjs",
+    "smoke": "node test/smoke.mjs",
+    "test": "npm run drift && npm run test:offline"
   },
   "keywords": [
     "mcp",
@@ -16,7 +19,10 @@
     "cellar",
     "sparql",
     "cjeu",
-    "legal"
+    "legal",
+    "gdpr",
+    "ecli",
+    "case-law"
   ],
   "author": "MateMatic / Wieslaw Mazur",
   "license": "MIT",

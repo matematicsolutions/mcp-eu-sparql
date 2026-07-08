@@ -1,16 +1,21 @@
 #!/usr/bin/env node
 // MCP server - EU legislation + CJEU case law via Publications Office SPARQL
-// (Cellar / EUR-Lex). Stdio transport - wpinany do Patrona przez mcp-servers.json.
+// (Cellar / EUR-Lex) + GDPRhub (MediaWiki API, decyzje krajowych DPA).
+// Stdio transport - wpinany do Patrona przez mcp-servers.json.
 //
-// Endpoint: https://publications.europa.eu/webapi/rdf/sparql
+// Endpointy:
+//   - https://publications.europa.eu/webapi/rdf/sparql (Cellar)
+//   - https://gdprhub.eu/api.php (MediaWiki, CC BY-NC-SA 4.0)
 //
 // Tooly:
-//   - search_by_celex     - znajdz akt po sygnaturze CELEX
+//   - search_by_celex      - znajdz akt / orzeczenie po sygnaturze CELEX
 //   - search_by_date_range - akty z zakresu dat (REG/DIR/DEC + opcjonalnie typ)
-//   - search_cjeu          - orzecznictwo CJEU z zakresu dat
+//   - search_cjeu          - orzecznictwo CJEU (JUDG/ORDER/OPIN_AG, keyword, daty)
+//   - search_cjeu_by_ecli  - orzeczenie CJEU po identyfikatorze ECLI
+//   - search_gdprhub       - decyzje krajowych DPA + komentarze RODO (GDPRhub)
 //
 // Kazda zwrotka zawiera structuredContent.citations - lista obiektow
-// { title, url, snippet?, celex, publication_date?, document_type }.
+// { title, url, snippet?, celex?, ecli?, publication_date?, document_type?, license? }.
 // Patron czyta to pole automatycznie i wystawia w panelu UI.
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -20,21 +25,29 @@ import {
     ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
+import {
+    RESOURCE_TYPES,
+    searchByCelexQuery,
+    searchByDateRangeQuery,
+    searchCjeuByEcliQuery,
+    searchCjeuQuery,
+} from "./queries.js";
+import {
+    buildCitations,
+    buildGdprhubCitations,
+    formatGdprhubRows,
+    formatRows,
+    type GdprhubSearchResponse,
+    type SparqlResponse,
+} from "./format.js";
+
 // ---------------------------------------------------------------------------
-// SPARQL client
+// HTTP clients
 // ---------------------------------------------------------------------------
 
 const SPARQL_ENDPOINT = "https://publications.europa.eu/webapi/rdf/sparql";
+const GDPRHUB_API = "https://gdprhub.eu/api.php";
 const HTTP_TIMEOUT_MS = 30000;
-
-interface SparqlBinding {
-    [key: string]: { type: string; value: string } | undefined;
-}
-
-interface SparqlResponse {
-    head: { vars: string[] };
-    results: { bindings: SparqlBinding[] };
-}
 
 async function runSparql(query: string): Promise<SparqlResponse> {
     const params = new URLSearchParams();
@@ -65,184 +78,37 @@ async function runSparql(query: string): Promise<SparqlResponse> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// SPARQL queries
-// ---------------------------------------------------------------------------
-
-const PREFIXES = `
-PREFIX cdm: <http://publications.europa.eu/ontology/cdm#>
-PREFIX dc:  <http://purl.org/dc/elements/1.1/>
-PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-`;
-
-// Mapowanie typu aktu (skrot uzytkownika) -> URI Resource-Type.
-const RESOURCE_TYPES: Record<string, string> = {
-    REG: "http://publications.europa.eu/resource/authority/resource-type/REG",
-    DIR: "http://publications.europa.eu/resource/authority/resource-type/DIR",
-    DEC: "http://publications.europa.eu/resource/authority/resource-type/DEC",
-    RECO: "http://publications.europa.eu/resource/authority/resource-type/RECO",
-    OPIN: "http://publications.europa.eu/resource/authority/resource-type/OPIN",
-    JUDG: "http://publications.europa.eu/resource/authority/resource-type/JUDG",
-    ORDER:
-        "http://publications.europa.eu/resource/authority/resource-type/ORDER_CJ",
-};
-
-function searchByCelexQuery(celex: string, lang: string): string {
-    // Eskapuj cudzyslowy w SPARQL - tylko " i \ wymagaja escape'u.
-    const safeCelex = celex.replace(/["\\]/g, "\\$&");
-    const safeLang = lang.replace(/["\\]/g, "\\$&");
-    return `${PREFIXES}
-SELECT DISTINCT ?work ?celex ?date ?type ?title
-WHERE {
-  ?work cdm:resource_legal_id_celex ?celex .
-  FILTER(STR(?celex) = "${safeCelex}")
-  OPTIONAL { ?work cdm:work_date_document ?date }
-  OPTIONAL { ?work cdm:work_has_resource-type ?type }
-  OPTIONAL {
-    ?expr cdm:expression_belongs_to_work ?work ;
-          cdm:expression_uses_language ?lang ;
-          cdm:expression_title ?title .
-    ?lang dc:identifier "${safeLang}" .
-  }
-}
-LIMIT 1
-`;
-}
-
-function searchByDateRangeQuery(
-    dateFrom: string,
-    dateTo: string,
-    typeUri: string | null,
-    lang: string,
+async function runGdprhubSearch(
+    query: string,
     limit: number,
-): string {
-    const safeFrom = dateFrom.replace(/["\\]/g, "\\$&");
-    const safeTo = dateTo.replace(/["\\]/g, "\\$&");
-    const safeLang = lang.replace(/["\\]/g, "\\$&");
-    const typeFilter = typeUri
-        ? `?work cdm:work_has_resource-type <${typeUri}> .`
-        : "";
-    return `${PREFIXES}
-SELECT DISTINCT ?work ?celex ?date ?type ?title
-WHERE {
-  ${typeFilter}
-  ?work cdm:work_date_document ?date .
-  OPTIONAL { ?work cdm:resource_legal_id_celex ?celex }
-  OPTIONAL { ?work cdm:work_has_resource-type ?type }
-  OPTIONAL {
-    ?expr cdm:expression_belongs_to_work ?work ;
-          cdm:expression_uses_language ?lang ;
-          cdm:expression_title ?title .
-    ?lang dc:identifier "${safeLang}" .
-  }
-  FILTER (?date >= "${safeFrom}"^^xsd:date && ?date <= "${safeTo}"^^xsd:date)
-  FILTER NOT EXISTS { ?work cdm:do_not_index "true"^^xsd:boolean }
-}
-ORDER BY DESC(?date)
-LIMIT ${limit}
-`;
-}
-
-function searchCjeuQuery(
-    dateFrom: string | null,
-    dateTo: string | null,
-    lang: string,
-    limit: number,
-): string {
-    const safeLang = lang.replace(/["\\]/g, "\\$&");
-    const dateFilter =
-        dateFrom && dateTo
-            ? `FILTER (?date >= "${dateFrom.replace(/["\\]/g, "\\$&")}"^^xsd:date && ?date <= "${dateTo.replace(/["\\]/g, "\\$&")}"^^xsd:date)`
-            : "";
-    return `${PREFIXES}
-SELECT DISTINCT ?work ?celex ?date ?title
-WHERE {
-  { ?work cdm:work_has_resource-type <${RESOURCE_TYPES.JUDG}> }
-  UNION
-  { ?work cdm:work_has_resource-type <${RESOURCE_TYPES.ORDER}> }
-  ?work cdm:work_date_document ?date .
-  OPTIONAL { ?work cdm:resource_legal_id_celex ?celex }
-  OPTIONAL {
-    ?expr cdm:expression_belongs_to_work ?work ;
-          cdm:expression_uses_language ?lang ;
-          cdm:expression_title ?title .
-    ?lang dc:identifier "${safeLang}" .
-  }
-  ${dateFilter}
-  FILTER NOT EXISTS { ?work cdm:do_not_index "true"^^xsd:boolean }
-}
-ORDER BY DESC(?date)
-LIMIT ${limit}
-`;
-}
-
-// ---------------------------------------------------------------------------
-// Citation builder
-// ---------------------------------------------------------------------------
-
-interface EuCitation {
-    title: string;
-    url: string;
-    snippet?: string;
-    celex?: string;
-    publication_date?: string;
-    document_type?: string;
-}
-
-function eurLexUrl(celex: string, lang: string = "PL"): string {
-    return `https://eur-lex.europa.eu/legal-content/${lang}/TXT/?uri=CELEX:${encodeURIComponent(celex)}`;
-}
-
-function shortTypeFromUri(uri: string): string {
-    // URI: http://publications.europa.eu/resource/authority/resource-type/REG
-    const m = uri.match(/\/resource-type\/([A-Z_]+)$/);
-    return m ? m[1] : uri;
-}
-
-function buildCitations(rows: SparqlBinding[], lang: string): EuCitation[] {
-    const out: EuCitation[] = [];
-    for (const row of rows) {
-        const celex = row.celex?.value;
-        if (!celex) continue;
-        const title = row.title?.value;
-        const date = row.date?.value;
-        const typeUri = row.type?.value;
-        out.push({
-            title: title ?? celex,
-            url: eurLexUrl(celex, lang === "POL" ? "PL" : "EN"),
-            ...(date && { publication_date: date }),
-            ...(celex && { celex }),
-            ...(typeUri && { document_type: shortTypeFromUri(typeUri) }),
+): Promise<GdprhubSearchResponse> {
+    const params = new URLSearchParams({
+        action: "query",
+        list: "search",
+        srsearch: query,
+        srlimit: String(limit),
+        format: "json",
+    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS + 5000);
+    try {
+        const res = await fetch(`${GDPRHUB_API}?${params.toString()}`, {
+            headers: {
+                Accept: "application/json",
+                "User-Agent":
+                    "mcp-eu-sparql (https://github.com/matematicsolutions/mcp-eu-sparql)",
+            },
+            signal: controller.signal,
         });
+        if (!res.ok) {
+            throw new Error(
+                `GDPRhub API returned HTTP ${res.status} ${res.statusText}`,
+            );
+        }
+        return (await res.json()) as GdprhubSearchResponse;
+    } finally {
+        clearTimeout(timer);
     }
-    return out;
-}
-
-// ---------------------------------------------------------------------------
-// Human-readable text formatter
-// ---------------------------------------------------------------------------
-
-function formatRows(rows: SparqlBinding[], header: string): string {
-    if (rows.length === 0) {
-        return (
-            header +
-            "\n\nBrak wynikow. Sprobuj szerszego zakresu dat lub innego CELEX-a."
-        );
-    }
-    const lines = [header, ""];
-    for (const row of rows) {
-        const celex = row.celex?.value ?? "brak_celex";
-        const date = row.date?.value ?? "?";
-        const typeUri = row.type?.value;
-        const type = typeUri ? shortTypeFromUri(typeUri) : "?";
-        const title = row.title?.value;
-        lines.push(`CELEX: ${celex}`);
-        lines.push(`  Data : ${date} | Typ: ${type}`);
-        if (title) lines.push(`  Tytul: ${title}`);
-        lines.push(`  URL  : ${eurLexUrl(celex)}`);
-        lines.push("");
-    }
-    return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -251,40 +117,45 @@ function formatRows(rows: SparqlBinding[], header: string): string {
 // Pattern z dograh-hq/dograh v1.31.0 (BSD-2) via mcp-eu-compliance v0.2.0.
 // ---------------------------------------------------------------------------
 
-const INSTRUCTIONS = `Ten serwer MCP odpytuje oficjalny endpoint SPARQL Publications Office (publications.europa.eu/webapi/rdf/sparql) i graf wiedzy Cellar (ontologia CDM). Zwraca akty prawne UE i orzeczenia CJEU z stabilnymi identyfikatorami CELEX i URL EUR-Lex.
+const INSTRUCTIONS = `Ten serwer MCP odpytuje oficjalny endpoint SPARQL Publications Office (publications.europa.eu/webapi/rdf/sparql) i graf wiedzy Cellar (ontologia CDM) oraz API MediaWiki GDPRhub (gdprhub.eu). Zwraca akty prawne UE, orzeczenia CJEU (z CELEX i ECLI) oraz decyzje krajowych organow ochrony danych.
 
 ## Kolejnosc wywolan
 
-### Konkretny akt prawny
-1. \`search_by_celex\` - jesli znasz CELEX (np. RODO=32016R0679, AI Act=32024R1689, DORA=32022R2554). Najszybciej i najpewniej.
+### Konkretny akt prawny lub orzeczenie
+1. \`search_by_celex\` - jesli znasz CELEX (np. RODO=32016R0679, AI Act=32024R1689, DORA=32022R2554, wyrok Schrems II=62018CJ0311). Najszybciej i najpewniej.
+2. \`search_cjeu_by_ecli\` - jesli znasz ECLI orzeczenia CJEU (np. ECLI:EU:C:2020:559 = Schrems II). Zwraca CELEX, date, tytul (strony + sygnatura + slowa kluczowe).
 
 ### Przeglad legislacji w okresie
-2. \`search_by_date_range\` - akty UE z zakresu dat. Opcjonalnie filtruj typ (REG/DIR/DEC/RECO/OPIN). Maks 50 wynikow.
+3. \`search_by_date_range\` - akty UE z zakresu dat. Opcjonalnie filtruj typ (REG/DIR/DEC/RECO/OPIN). Maks 50 wynikow.
 
 ### Orzecznictwo CJEU
-3. \`search_cjeu\` - orzeczenia Trybunalu Sprawiedliwosci UE (wyroki JUDG, postanowienia ORDER). Opcjonalny zakres dat. Format CELEX dla CJEU: 6 cyfr roku + CJ + nr sprawy (np. 62022CJ0252).
+4. \`search_cjeu\` - orzeczenia Trybunalu Sprawiedliwosci UE: wyroki (JUDG, 34 tys.), postanowienia (ORDER, 8 tys.), opinie rzecznikow generalnych (OPIN_AG, 14 tys.). Opcjonalny zakres dat, typ dokumentu i \`query\` (keyword w tytule - tytul CJEU zawiera strony, sygnature i slowa kluczowe wyroku). Format CELEX dla CJEU: 6 + rok + kod (CJ=wyrok C, CO=postanowienie, CC=opinia AG) + nr sprawy (np. 62018CJ0311).
+
+### Decyzje krajowych DPA (RODO w praktyce panstw czlonkowskich)
+5. \`search_gdprhub\` - pelnotekstowe wyszukiwanie w GDPRhub (gdprhub.eu, projekt noyb) - decyzje krajowych organow ochrony danych z calej UE + komentarze do artykulow RODO. UWAGA licencja tresci: CC BY-NC-SA 4.0 (niekomercyjna, share-alike) - kazda citation niesie pole \`license\` - przy wykorzystaniu tresci (nie samego linku) uprzedz uzytkownika o ograniczeniu NC.
 
 ## Twarde ograniczenia
 
-- **CELEX kluczowy dla cytowalnosci** - kazda odpowiedz zawiera CELEX w \`structuredContent.citations\`. Bez CELEX brak cytowalnosci.
+- **CELEX/ECLI kluczowe dla cytowalnosci** - odpowiedzi Cellar zawieraja CELEX (i ECLI dla case-law) w \`structuredContent.citations\`. Bez identyfikatora brak cytowalnosci.
 - **Wielojezycznosc 24 jezyki UE** - default jezyk POL. Parametr \`lang\` (POL/ENG/FRA/DEU). Polskie tytuly nie zawsze sa - fallback na ENG dla CJEU jesli brak.
-- **Stateless** - kazde wywolanie idzie do SPARQL live. NIE cachuj wynikow (akty konsoliduja sie / status sie zmienia).
-- **Bez scrapingu EUR-Lex** - korzystamy z oficjalnego SPARQL endpoint.
-- **\`structuredContent.citations\`**: title, url (EUR-Lex), celex, publication_date, document_type. Cytuj te citations w odpowiedzi koncowej.
+- **Stateless** - kazde wywolanie idzie do zrodla live. NIE cachuj wynikow (akty konsoliduja sie / status sie zmienia).
+- **Bez scrapingu** - Cellar przez oficjalny SPARQL endpoint, GDPRhub przez oficjalne API MediaWiki.
+- **\`structuredContent.citations\`**: title, url, celex?, ecli?, publication_date?, document_type?, snippet?, license?. Cytuj te citations w odpowiedzi koncowej.
 
 ## Iteracja po bledach
 
 Tool zwraca \`isError: true\` + tekst z prefixem \`[code]\`. Typowe kody:
-- \`missing_arg\` - brakujacy wymagany parametr (celex w search_by_celex; date_from/date_to w search_by_date_range). Przeczytaj inputSchema.
+- \`missing_arg\` - brakujacy wymagany parametr (celex w search_by_celex; ecli w search_cjeu_by_ecli; query w search_gdprhub; date_from/date_to w search_by_date_range). Przeczytaj inputSchema.
 - \`invalid_date\` - data nie w formacie YYYY-MM-DD lub date_to przed date_from.
-- \`upstream_error\` - blad SPARQL endpoint (HTTP, timeout, malformed response). Retry raz przed surface do uzytkownika.
-- \`empty_result\` - brak wynikow dla danego CELEX/zakresu. Zwery zewnetrznym katalogiem (eur-lex.europa.eu).
+- \`upstream_error\` - blad endpointu (HTTP, timeout, malformed response). Retry raz przed surface do uzytkownika.
+- \`empty_result\` - brak wynikow dla danego CELEX/ECLI/zakresu. Zwery zewnetrznym katalogiem (eur-lex.europa.eu / curia.europa.eu / gdprhub.eu).
 
 ## Styl odpowiedzi
 
 - Cytuj akty w formacie "AI Act (32024R1689)" lub "RODO (32016R0679)" - skrocony tytul + CELEX.
-- Dla CJEU: "Wyrok C-252/22 (62022CJ0252) z dnia ...".
-- NIE wymyslaj CELEX-ow ani dat - wszystko z \`structuredContent.citations\`.
+- Dla CJEU: "Wyrok C-311/18 Schrems II (62018CJ0311, ECLI:EU:C:2020:559) z dnia 16.07.2020".
+- Dla GDPRhub: tytul strony + URL + adnotacja o licencji CC BY-NC-SA 4.0.
+- NIE wymyslaj CELEX-ow, ECLI ani dat - wszystko z \`structuredContent.citations\`.
 - Disclaimer wielojezycznosci: jesli zwracasz angielskie tytuly dla aktow ktore powinny miec PL, oznacz to.`;
 
 // ---------------------------------------------------------------------------
@@ -295,7 +166,7 @@ const READ_ONLY_ANNOTATIONS = {
     readOnlyHint: true,
     idempotentHint: true,
     destructiveHint: false,
-    openWorldHint: true, // upstream SPARQL endpoint live
+    openWorldHint: true, // upstream endpoints live
 } as const;
 
 const TOOLS = [
@@ -303,10 +174,10 @@ const TOOLS = [
         name: "search_by_celex",
         annotations: READ_ONLY_ANNOTATIONS,
         description:
-            "Znajdz akt prawny UE po numerze CELEX. " +
-            "Numer CELEX jest unikalny i identyfikuje akt niezaleznie od jezyka. " +
-            "Przyklady: 32016R0679 (RODO), 31995L0046 (uchylony dyrektywa o ochronie danych), " +
-            "62022CJ0252 (orzeczenie CJEU). Zwraca tytul w wybranym jezyku + EUR-Lex URL.",
+            "Znajdz akt prawny UE lub orzeczenie CJEU po numerze CELEX. " +
+            "Numer CELEX jest unikalny i identyfikuje dokument niezaleznie od jezyka. " +
+            "Przyklady: 32016R0679 (RODO), 31995L0046 (uchylona dyrektywa o ochronie danych), " +
+            "62018CJ0311 (wyrok Schrems II). Zwraca tytul w wybranym jezyku, ECLI (dla case-law) i EUR-Lex URL.",
         inputSchema: {
             type: "object",
             properties: {
@@ -370,12 +241,19 @@ const TOOLS = [
         name: "search_cjeu",
         annotations: READ_ONLY_ANNOTATIONS,
         description:
-            "Wyszukaj orzeczenia Trybunalu Sprawiedliwosci UE (CJEU) - wyroki (JUDG) " +
-            "i postanowienia (ORDER). Opcjonalnie zawez do zakresu dat. " +
-            "Zwraca CELEX (np. 62022CJ0252), date wydania, tytul (jezyk wg lang) i EUR-Lex URL.",
+            "Wyszukaj orzecznictwo Trybunalu Sprawiedliwosci UE (CJEU): wyroki (JUDG), " +
+            "postanowienia (ORDER) i opinie rzecznikow generalnych (OPIN_AG). " +
+            "Opcjonalnie zawez do zakresu dat, typu dokumentu i keyworda w tytule " +
+            "(tytul CJEU zawiera strony sprawy, sygnature i slowa kluczowe wyroku). " +
+            "Zwraca CELEX (np. 62018CJ0311), ECLI, date wydania, tytul (jezyk wg lang) i EUR-Lex URL.",
         inputSchema: {
             type: "object",
             properties: {
+                query: {
+                    type: "string",
+                    description:
+                        "Keyword wyszukiwany w tytule orzeczenia (case-insensitive), np. 'personal data' albo 'Schrems'. Opcjonalny.",
+                },
                 date_from: {
                     type: "string",
                     description: "Data od (YYYY-MM-DD). Opcjonalna.",
@@ -383,6 +261,12 @@ const TOOLS = [
                 date_to: {
                     type: "string",
                     description: "Data do (YYYY-MM-DD). Opcjonalna.",
+                },
+                document_type: {
+                    type: "string",
+                    description:
+                        "Typ dokumentu: JUDG=wyrok, ORDER=postanowienie, OPIN_AG=opinia rzecznika generalnego. Pomin zeby objac wszystkie trzy.",
+                    enum: ["JUDG", "ORDER", "OPIN_AG"],
                 },
                 lang: {
                     type: "string",
@@ -398,6 +282,56 @@ const TOOLS = [
                 },
             },
             required: [],
+        },
+    },
+    {
+        name: "search_cjeu_by_ecli",
+        annotations: READ_ONLY_ANNOTATIONS,
+        description:
+            "Znajdz orzeczenie CJEU po identyfikatorze ECLI (European Case Law Identifier), " +
+            "np. 'ECLI:EU:C:2020:559' (Schrems II). Zwraca CELEX, date wydania, tytul " +
+            "(strony + sygnatura + slowa kluczowe) i EUR-Lex URL.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                ecli: {
+                    type: "string",
+                    description:
+                        "Identyfikator ECLI orzeczenia CJEU, np. 'ECLI:EU:C:2020:559'.",
+                },
+                lang: {
+                    type: "string",
+                    description: "ISO 639-3 jezyka tytulu. Domyslnie POL.",
+                    enum: ["POL", "ENG", "FRA", "DEU"],
+                },
+            },
+            required: ["ecli"],
+        },
+    },
+    {
+        name: "search_gdprhub",
+        annotations: READ_ONLY_ANNOTATIONS,
+        description:
+            "Pelnotekstowe wyszukiwanie w GDPRhub (gdprhub.eu) - wiki projektu noyb " +
+            "agregujaca decyzje krajowych organow ochrony danych (DPA) z calej UE " +
+            "oraz komentarze do artykulow RODO. Zwraca tytul, snippet i URL strony. " +
+            "Licencja tresci: CC BY-NC-SA 4.0 (pole license w kazdej citation).",
+        inputSchema: {
+            type: "object",
+            properties: {
+                query: {
+                    type: "string",
+                    description:
+                        "Zapytanie pelnotekstowe, np. 'Schrems', 'UODO fine', 'Article 33 notification'.",
+                },
+                limit: {
+                    type: "number",
+                    description: "Maks. liczba wynikow (1-50). Domyslnie 10.",
+                    minimum: 1,
+                    maximum: 50,
+                },
+            },
+            required: ["query"],
         },
     },
 ] as const;
@@ -420,7 +354,7 @@ function errorResult(text: string, code: ErrorCode) {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const server = new Server(
-    { name: "mcp-eu-sparql", version: "1.1.0" },
+    { name: "mcp-eu-sparql", version: "1.2.0" },
     { capabilities: { tools: {} }, instructions: INSTRUCTIONS },
 );
 
@@ -515,16 +449,47 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     typeof a.date_from === "string" ? a.date_from : null;
                 const dateTo =
                     typeof a.date_to === "string" ? a.date_to : null;
+                if (
+                    (dateFrom && !DATE_RE.test(dateFrom)) ||
+                    (dateTo && !DATE_RE.test(dateTo))
+                ) {
+                    return errorResult(
+                        `daty musza byc w formacie YYYY-MM-DD. Otrzymano: from='${dateFrom}', to='${dateTo}'.`,
+                        "invalid_date",
+                    );
+                }
+                if (dateFrom && dateTo && dateTo < dateFrom) {
+                    return errorResult(
+                        `date_to ('${dateTo}') wczesniejsza niz date_from ('${dateFrom}').`,
+                        "invalid_date",
+                    );
+                }
+                const docType =
+                    typeof a.document_type === "string" &&
+                    ["JUDG", "ORDER", "OPIN_AG"].includes(a.document_type)
+                        ? a.document_type
+                        : null;
+                const keyword =
+                    typeof a.query === "string" && a.query.trim().length > 0
+                        ? a.query.trim()
+                        : null;
                 const limit =
                     typeof a.limit === "number"
                         ? Math.min(50, Math.max(1, Math.floor(a.limit)))
                         : 20;
-                const sparql = searchCjeuQuery(dateFrom, dateTo, lang, limit);
+                const sparql = searchCjeuQuery(
+                    dateFrom,
+                    dateTo,
+                    docType,
+                    keyword,
+                    lang,
+                    limit,
+                );
                 const data = await runSparql(sparql);
                 const rows = data.results.bindings;
                 const text = formatRows(
                     rows,
-                    `Wynik search_cjeu(${dateFrom ?? "*"}..${dateTo ?? "*"}, lang=${lang}):`,
+                    `Wynik search_cjeu(${dateFrom ?? "*"}..${dateTo ?? "*"}, type=${docType ?? "ALL"}, query=${keyword ?? "-"}, lang=${lang}):`,
                 );
                 return {
                     content: [{ type: "text", text }],
@@ -534,13 +499,64 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
             }
 
+            case "search_cjeu_by_ecli": {
+                if (!a.ecli || typeof a.ecli !== "string") {
+                    return errorResult(
+                        "parametr 'ecli' jest wymagany (string), np. 'ECLI:EU:C:2020:559'.",
+                        "missing_arg",
+                    );
+                }
+                const sparql = searchCjeuByEcliQuery(a.ecli, lang);
+                const data = await runSparql(sparql);
+                const rows = data.results.bindings;
+                if (rows.length === 0) {
+                    return errorResult(
+                        `brak orzeczenia CJEU o ECLI '${a.ecli}'. Sprawdz format (ECLI:EU:C:YYYY:NNN) lub zweryfikuj na curia.europa.eu.`,
+                        "empty_result",
+                    );
+                }
+                const text = formatRows(
+                    rows,
+                    `Wynik search_cjeu_by_ecli(ecli="${a.ecli}", lang=${lang}):`,
+                );
+                return {
+                    content: [{ type: "text", text }],
+                    structuredContent: {
+                        citations: buildCitations(rows, lang),
+                    },
+                };
+            }
+
+            case "search_gdprhub": {
+                if (!a.query || typeof a.query !== "string") {
+                    return errorResult(
+                        "parametr 'query' jest wymagany (string).",
+                        "missing_arg",
+                    );
+                }
+                const limit =
+                    typeof a.limit === "number"
+                        ? Math.min(50, Math.max(1, Math.floor(a.limit)))
+                        : 10;
+                const data = await runGdprhubSearch(a.query, limit);
+                const { citations } = buildGdprhubCitations(data);
+                const text = formatGdprhubRows(
+                    data,
+                    `Wynik search_gdprhub(query="${a.query}", limit=${limit}):`,
+                );
+                return {
+                    content: [{ type: "text", text }],
+                    structuredContent: { citations },
+                };
+            }
+
             default:
                 return errorResult(`Nieznane narzedzie: ${name}`, "missing_arg");
         }
     } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         return errorResult(
-            `Blad komunikacji z Publications Office SPARQL: ${msg}. Sprobuj ponownie za chwile lub zawez zakres dat / dodaj typ dokumentu.`,
+            `Blad komunikacji ze zrodlem upstream: ${msg}. Sprobuj ponownie za chwile lub zawez zakres dat / dodaj typ dokumentu.`,
             "upstream_error",
         );
     }

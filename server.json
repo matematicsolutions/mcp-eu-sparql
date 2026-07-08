@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.matematicsolutions/mcp-eu-sparql",
-  "description": "MCP server for EU legislation and CJEU case law via Publications Office SPARQL (Cellar).",
-  "version": "1.1.1",
+  "description": "EU legislation and CJEU case law via Publications Office SPARQL (Cellar) + GDPRhub DPA decisions.",
+  "version": "1.2.0",
   "repository": {
     "url": "https://github.com/matematicsolutions/mcp-eu-sparql",
     "source": "github"
@@ -12,7 +12,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@matematicsolutions/mcp-eu-sparql",
-      "version": "1.1.1",
+      "version": "1.2.0",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
