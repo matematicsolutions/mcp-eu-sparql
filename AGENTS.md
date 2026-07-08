@@ -15,7 +15,7 @@ The repo is run by [MateMatic Solutions](https://matematicsolutions.com).
 - **Every tool call MUST return `structuredContent.citations`** with: the CELEX identifier, the act title, the canonical URL (EUR-Lex), the publication date, and the access format (document format + language).
 - **CELEX is critical** - e.g. the AI Act = `32024R1689`. Without CELEX there is no citability.
 - **Stateless**.
-- **Multilingual** - EU acts are published in 24 languages, default = `pl`, but the `language?` parameter for CJEU in English/French where no Polish version exists.
+- **Multilingual** - EU acts are published in 24 languages, default = `pl`, but the `language?` parameter falls back to English/French for CJEU where no Polish version exists.
 
 ## MCP tools (tools contract)
 
