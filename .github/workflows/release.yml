@@ -43,10 +43,16 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Publish to npm (granular token + provenance)
+      # 2026-07-08: NPM_TOKEN (set 2026-06-25) started returning E404 on PUT
+      # (expired/revoked granular token; a token env var would shadow OIDC, so
+      # it is removed). npm >= 11.5.1 auto-detects trusted publishing via
+      # GitHub OIDC (id-token: write) when a trusted publisher is configured
+      # on npmjs.com for this package. If this fails with ENEEDAUTH: either
+      # configure the trusted publisher (npmjs.com -> package settings ->
+      # Trusted publisher: GitHub Actions, repo matematicsolutions/mcp-eu-sparql,
+      # workflow release.yml) or set a fresh NPM_TOKEN and restore the env.
+      - name: Publish to npm (OIDC trusted publishing + provenance)
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-mcp-registry:
     needs: build-and-publish-npm
