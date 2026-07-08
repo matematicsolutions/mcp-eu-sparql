@@ -1,35 +1,35 @@
 # AGENTS.md - mcp-eu-sparql
 
-Plik standardu [agents.md](https://agents.md) (Linux Foundation / Agentic AI Foundation) - kanoniczne instrukcje dla agentow AI pracujacych z tym repozytorium. Czytany natywnie przez Cursor, Codex (OpenAI), Jules (Google), Devin / Windsurf, Aider, Amp, Factory, GitHub Copilot.
+A file following the [agents.md](https://agents.md) standard (Linux Foundation / Agentic AI Foundation) - canonical instructions for AI agents working with this repository. Read natively by Cursor, Codex (OpenAI), Jules (Google), Devin / Windsurf, Aider, Amp, Factory, GitHub Copilot.
 
-## Cel projektu
+## Project goal
 
-Serwer **MCP (Model Context Protocol)** dla **prawa Unii Europejskiej i orzecznictwa CJEU** - przez oficjalny endpoint **SPARQL Publications Office** (`publications.europa.eu/webapi/rdf/sparql`) i graf wiedzy **Cellar** (ontologia CDM) - oraz **decyzji krajowych organow ochrony danych** przez oficjalne API MediaWiki **GDPRhub** (`gdprhub.eu/api.php`, tresc CC BY-NC-SA 4.0).
+An **MCP (Model Context Protocol)** server for **European Union law and CJEU case law** - via the official **Publications Office SPARQL** endpoint (`publications.europa.eu/webapi/rdf/sparql`) and the **Cellar** knowledge graph (CDM ontology) - plus **national data-protection authority decisions** via the official **GDPRhub** MediaWiki API (`gdprhub.eu/api.php`, content CC BY-NC-SA 4.0).
 
-Jeden z 5 konektorow polskiego prawa MateMatic ([`mcp-saos`](https://github.com/matematicsolutions/mcp-saos), [`mcp-nsa`](https://github.com/matematicsolutions/mcp-nsa), [`mcp-isap`](https://github.com/matematicsolutions/mcp-isap), [`mcp-krs`](https://github.com/matematicsolutions/mcp-krs), [`mcp-eu-sparql`](https://github.com/matematicsolutions/mcp-eu-sparql) (ten)).
+One of the 5 Polish-law MateMatic connectors ([`mcp-saos`](https://github.com/matematicsolutions/mcp-saos), [`mcp-nsa`](https://github.com/matematicsolutions/mcp-nsa), [`mcp-isap`](https://github.com/matematicsolutions/mcp-isap), [`mcp-krs`](https://github.com/matematicsolutions/mcp-krs), [`mcp-eu-sparql`](https://github.com/matematicsolutions/mcp-eu-sparql) (this one)).
 
-## Kontekst MateMatic (TWARDE OGRANICZENIA)
+## MateMatic context (HARD CONSTRAINTS)
 
-Repo prowadzi [MateMatic Solutions](https://matematicsolutions.com).
+The repo is run by [MateMatic Solutions](https://matematicsolutions.com).
 
-- **Kazde wywolanie narzedzia MUSI zwracac `structuredContent.citations`** z: identyfikatorem CELEX, tytulem aktu, URL kanonicznym (EUR-Lex), data publikacji, formatem dostepu (format dokumentu + jezyk).
-- **CELEX jest kluczowy** - np. AI Act = `32024R1689`. Bez CELEX brak cytowalnosci.
+- **Every tool call MUST return `structuredContent.citations`** with: the CELEX identifier, the act title, the canonical URL (EUR-Lex), the publication date, and the access format (document format + language).
+- **CELEX is critical** - e.g. the AI Act = `32024R1689`. Without CELEX there is no citability.
 - **Stateless**.
-- **Wielojezycznosc** - akty UE sa publikowane w 24 jezykach, default = `pl`, ale parametr `language?` dla CJEU w angielskim/francuskim gdzie polska wersja nie istnieje.
+- **Multilingual** - EU acts are published in 24 languages, default = `pl`, but the `language?` parameter for CJEU in English/French where no Polish version exists.
 
-## Narzedzia MCP (tools contract)
+## MCP tools (tools contract)
 
-| Tool | Parametry kluczowe | Zwraca |
+| Tool | Key parameters | Returns |
 |---|---|---|
-| `search_by_celex` | `celex` (np. `32024R1689`, `62018CJ0311`), `lang?` | metadata aktu/orzeczenia + ECLI (case-law) + citations |
-| `search_by_date_range` | `date_from`, `date_to`, `document_type?` (REG/DIR/DEC/RECO/OPIN), `lang?`, `limit?` | lista aktow + citations |
-| `search_cjeu` | `query?` (keyword w tytule), `date_from?`, `date_to?`, `document_type?` (JUDG/ORDER/OPIN_AG), `lang?`, `limit?` | orzeczenia CJEU (CELEX + ECLI) + citations |
-| `search_cjeu_by_ecli` | `ecli` (np. `ECLI:EU:C:2020:559`), `lang?` | orzeczenie CJEU (CELEX + data + tytul) + citations |
-| `search_gdprhub` | `query`, `limit?` | decyzje DPA / komentarze RODO (title + url + snippet + `license: CC BY-NC-SA 4.0`) |
+| `search_by_celex` | `celex` (e.g. `32024R1689`, `62018CJ0311`), `lang?` | act/judgment metadata + ECLI (case-law) + citations |
+| `search_by_date_range` | `date_from`, `date_to`, `document_type?` (REG/DIR/DEC/RECO/OPIN), `lang?`, `limit?` | list of acts + citations |
+| `search_cjeu` | `query?` (keyword in title), `date_from?`, `date_to?`, `document_type?` (JUDG/ORDER/OPIN_AG), `lang?`, `limit?` | CJEU judgments (CELEX + ECLI) + citations |
+| `search_cjeu_by_ecli` | `ecli` (e.g. `ECLI:EU:C:2020:559`), `lang?` | CJEU judgment (CELEX + date + title) + citations |
+| `search_gdprhub` | `query`, `limit?` | DPA decisions / GDPR commentary (title + url + snippet + `license: CC BY-NC-SA 4.0`) |
 
-Pelny opis: `src/index.ts` + `README.md`.
+Full description: `src/index.ts` + `README.md`.
 
-## Build i test
+## Build and test
 
 ```bash
 npm install        # Node 20+
@@ -38,43 +38,43 @@ npm start          # node dist/index.js
 npm run dev        # ts-node src/index.ts
 ```
 
-Test: `npm run drift` + `npm run test:offline` (offline, fixtures) + `npm run smoke` (live, 5 tooli).
-Interaktywnie: `npx @modelcontextprotocol/inspector node dist/index.js`.
+Test: `npm run drift` + `npm run test:offline` (offline, fixtures) + `npm run smoke` (live, 5 tools).
+Interactively: `npx @modelcontextprotocol/inspector node dist/index.js`.
 
-Testowy CELEX dla AI Act: `32024R1689`. Testowe ECLI: `ECLI:EU:C:2020:559` (Schrems II).
+Test CELEX for the AI Act: `32024R1689`. Test ECLI: `ECLI:EU:C:2020:559` (Schrems II).
 
-## Zasady kodu
+## Code rules
 
 - **TypeScript strict**.
 - **`@modelcontextprotocol/sdk` ^1.12.0**.
-- **SPARQL query templates** w `src/queries.ts` (czyste funkcje, testowane offline) - nie inline w handlerach. Mapowania Resource-Type CDM tamze (`RESOURCE_TYPES`). UWAGA: postanowienia CJEU = `.../ORDER` (8 362 works), NIE `.../ORDER_CJ` (0 works - cichy no-op naprawiony w 1.2.0).
-- **Parsowanie/citations** w `src/format.ts` (czyste funkcje).
-- **Bez polskich znakow w commit messages**.
-- **CHANGELOG bump przy zmianie kontraktu**.
+- **SPARQL query templates** in `src/queries.ts` (pure functions, tested offline) - not inline in handlers. CDM Resource-Type mappings there too (`RESOURCE_TYPES`). NOTE: CJEU orders = `.../ORDER` (8,362 works), NOT `.../ORDER_CJ` (0 works - silent no-op fixed in 1.2.0).
+- **Parsing/citations** in `src/format.ts` (pure functions).
+- **No Polish characters in commit messages**.
+- **CHANGELOG bump on any contract change**.
 
-## Czego NIE robic (twarde reguly)
+## What NOT to do (hard rules)
 
-- **NIE pomijaj CELEX** w citation - CELEX jest stabilnym identyfikatorem aktu UE.
-- **NIE zakladaj jednej wersji jezykowej** - sprawdz dostepnosc PL, fallback na EN dla CJEU.
-- **NIE dodawaj scrapingu EUR-Lex ani GDPRhub** - mamy oficjalny SPARQL endpoint i oficjalne API MediaWiki.
-- **NIE pomijaj pola `license` dla GDPRhub** - tresc jest CC BY-NC-SA 4.0 (niekomercyjna); flaga w kazdej citation to warunek uzycia tego zrodla.
-- **NIE cachuj wynikow** - akty UE moga zmieniac status (konsolidowane wersje).
+- **Do NOT omit CELEX** in a citation - CELEX is the stable identifier of an EU act.
+- **Do NOT assume a single language version** - check PL availability, fall back to EN for CJEU.
+- **Do NOT add scraping of EUR-Lex or GDPRhub** - we have the official SPARQL endpoint and the official MediaWiki API.
+- **Do NOT omit the `license` field for GDPRhub** - the content is CC BY-NC-SA 4.0 (non-commercial); flagging it in every citation is a condition of using this source.
+- **Do NOT cache results** - EU acts can change status (consolidated versions).
 
-## Zrodla prawdy
+## Sources of truth
 
 1. [README.md](./README.md)
 2. [CHANGELOG.md](./CHANGELOG.md)
 3. `src/index.ts` + `src/queries.ts` + `src/format.ts`
-4. [SPARQL endpoint Publications Office](https://publications.europa.eu/webapi/rdf/sparql) - upstream
-5. [Ontologia CDM Cellar](https://op.europa.eu/o/opportal-service/euvoc-download-handler?cellarURI=http%3A%2F%2Fpublications.europa.eu%2Fresource%2Fdistribution%2Fcdm%2F20231121-0%2Fzip) - schema RDF
-6. [EUR-Lex](https://eur-lex.europa.eu) - frontend uzytkownika
+4. [Publications Office SPARQL endpoint](https://publications.europa.eu/webapi/rdf/sparql) - upstream
+5. [Cellar CDM ontology](https://op.europa.eu/o/opportal-service/euvoc-download-handler?cellarURI=http%3A%2F%2Fpublications.europa.eu%2Fresource%2Fdistribution%2Fcdm%2F20231121-0%2Fzip) - RDF schema
+6. [EUR-Lex](https://eur-lex.europa.eu) - user-facing frontend
 
-## Kompatybilnosc agentow
+## Agent compatibility
 
-Standard [AGENTS.md](https://agents.md). Dla Claude Code dodatkowo plik [CLAUDE.md](./CLAUDE.md).
+The [AGENTS.md](https://agents.md) standard. For Claude Code, an additional [CLAUDE.md](./CLAUDE.md) file.
 
-## Licencja
+## License
 
-**MIT** - patrz [LICENSE](./LICENSE).
+**MIT** - see [LICENSE](./LICENSE).
 
-Cytowanie: *MateMatic Solutions (2026), mcp-eu-sparql - MCP server dla prawa UE i CJEU (Publications Office SPARQL), https://github.com/matematicsolutions/mcp-eu-sparql, MIT.*
+Citation: *MateMatic Solutions (2026), mcp-eu-sparql - MCP server for EU law and CJEU (Publications Office SPARQL), https://github.com/matematicsolutions/mcp-eu-sparql, MIT.*
