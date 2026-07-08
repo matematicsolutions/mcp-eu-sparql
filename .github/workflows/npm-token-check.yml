@@ -1,0 +1,29 @@
+name: npm-token-check
+
+# TEMPORARY diagnostic: verify whether the NPM_TOKEN repo secret is still
+# accepted by registry.npmjs.org. Prints only whoami/scope info, never the token.
+# Delete this file after the check.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: whoami against npm registry
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then echo "SECRET EMPTY"; exit 1; fi
+          code=$(curl -s -o /tmp/whoami.json -w "%{http_code}" -H "Authorization: Bearer $NPM_TOKEN" https://registry.npmjs.org/-/whoami)
+          echo "whoami HTTP $code"
+          cat /tmp/whoami.json; echo
+
+      - name: packages accessible to this token
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
+          npm whoami || true
+          npm access list packages 2>&1 || true
